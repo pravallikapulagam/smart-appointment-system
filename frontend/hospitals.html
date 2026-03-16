@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Hospitals</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+
+<body class="bg-light">
+
+<nav class="navbar navbar-dark bg-primary px-3">
+  <button onclick="goBack()" class="btn btn-light btn-sm">← Back</button>
+  <span class="navbar-brand">Hospitals</span>
+  <button onclick="logout()" class="btn btn-light btn-sm">Logout</button>
+</nav>
+
+<div class="container mt-4">
+  <h4 id="title"></h4>
+  <div class="row" id="hospitalList"></div>
+</div>
+
+<script>
+const city = localStorage.getItem("city");
+document.getElementById("title").innerText = "Hospitals in " + city;
+
+fetch("http://localhost:3000/hospitals/" + city)
+.then(res => res.json())
+.then(data => {
+
+  const container = document.getElementById("hospitalList");
+  container.innerHTML = "";
+
+  data.forEach(h => {
+    container.innerHTML += `
+      <div class="col-md-4 mb-4">
+        <div class="card shadow">
+        <img 
+  src="${h.image}" 
+  class="card-img-top"
+  style="height:200px; object-fit:cover;"
+>
+          <div class="card-body">
+            <h5>${h.name}</h5>
+            <p>${h.description}</p>
+            <button class="btn btn-primary w-100"
+              onclick="viewHospital(${h.id})">
+              View Details
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  });
+
+});
+
+function viewHospital(id) {
+  localStorage.setItem("hospitalId", id);
+  window.location.href = "hospital-details.html";
+}
+
+function goBack() {
+  window.history.back();
+}
+
+function logout() {
+  localStorage.clear();
+  window.location.href = "login.html";
+}
+</script>
+
+</body>
+</html>

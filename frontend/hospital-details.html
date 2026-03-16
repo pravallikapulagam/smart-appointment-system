@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Hospital Details</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+
+<body class="bg-light">
+
+<!-- NAVBAR -->
+<nav class="navbar navbar-dark bg-primary px-3">
+  <button onclick="goBack()" class="btn btn-light btn-sm">← Back</button>
+  <span class="navbar-brand">Hospital Details</span>
+  <button onclick="logout()" class="btn btn-light btn-sm">Logout</button>
+</nav>
+
+<div class="container mt-4">
+
+  <!-- Hospital Info -->
+  <div id="hospitalDetails"></div>
+
+  <!-- Doctors Section -->
+  <h4 class="mt-4">Available Doctors</h4>
+  <div id="doctorList"></div>
+
+</div>
+
+<script>
+
+const hospitalId = localStorage.getItem("hospitalId");
+
+if (!hospitalId) {
+  alert("No hospital selected");
+  window.location.href = "hospitals.html";
+}
+
+// ================= LOAD HOSPITAL DETAILS =================
+fetch("http://localhost:3000/hospital/" + hospitalId)
+  .then(res => res.json())
+  .then(hospital => {
+
+    const container = document.getElementById("hospitalDetails");
+
+    container.innerHTML = `
+      <div class="card shadow mb-4">
+        <img 
+          src="${hospital.image}" 
+          class="card-img-top"
+          style="height:300px; object-fit:cover;"
+        >
+        <div class="card-body">
+          <h3>${hospital.name}</h3>
+          <p>${hospital.description}</p>
+        </div>
+      </div>
+    `;
+  })
+  .catch(error => {
+    console.error("Error loading hospital:", error);
+  });
+
+
+// ================= LOAD DOCTORS =================
+fetch("http://localhost:3000/hospital-doctors/" + hospitalId)
+  .then(res => res.json())
+  .then(doctors => {
+
+    const doctorContainer = document.getElementById("doctorList");
+    doctorContainer.innerHTML = "";
+
+    doctors.forEach(doc => {
+      doctorContainer.innerHTML += `
+        <div class="card shadow-sm mb-3 p-3">
+          <h5>${doc.name}</h5>
+          <p>${doc.specialization} - ${doc.experience}</p>
+          <button 
+            class="btn btn-success btn-sm"
+            onclick="bookDoctor(${doc.id})">
+            Book Appointment
+          </button>
+        </div>
+      `;
+    });
+  })
+  .catch(error => {
+    console.error("Error loading doctors:", error);
+  });
+
+
+// ================= BOOK DOCTOR =================
+function bookDoctor(doctorId) {
+  localStorage.setItem("doctorId", doctorId);
+  window.location.href = "book-appointment.html";
+}
+
+
+// ================= BACK =================
+function goBack() {
+  window.history.back();
+}
+
+
+// ================= LOGOUT =================
+function logout() {
+  localStorage.clear();
+  window.location.href = "login.html";
+}
+
+</script>
+
+</body>
+</html>
