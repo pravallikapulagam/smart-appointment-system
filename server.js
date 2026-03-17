@@ -219,7 +219,7 @@ app.post("/appointments", verifyToken, async (req, res) => {
 });
 
 /* ================= FRONTEND ROUTE ================= */
-app.get("*", (req, res) => {
+app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "frontend", "login.html"));
 });
 
