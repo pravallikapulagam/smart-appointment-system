@@ -10,9 +10,10 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-app.use("/images", express.static(path.join(__dirname, "images")));
+// ✅ Serve frontend
+app.use(express.static(path.join(__dirname, "frontend")));
 
-// ✅ PostgreSQL connection (Neon)
+// ✅ PostgreSQL (Neon)
 const db = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: {
@@ -82,7 +83,7 @@ app.get("/hospitals/:city", async (req, res) => {
       [req.params.city]
     );
     res.json(result.rows);
-  } catch (err) {
+  } catch {
     res.status(500).json({ message: "Error fetching hospitals" });
   }
 });
@@ -95,7 +96,7 @@ app.get("/hospital/:id", async (req, res) => {
       [req.params.id]
     );
     res.json(result.rows[0]);
-  } catch (err) {
+  } catch {
     res.status(500).json({ message: "Error fetching hospital" });
   }
 });
@@ -108,7 +109,7 @@ app.get("/hospital-doctors/:hospital_id", async (req, res) => {
       [req.params.hospital_id]
     );
     res.json(result.rows);
-  } catch (err) {
+  } catch {
     res.status(500).json({ message: "Error fetching doctors" });
   }
 });
@@ -135,7 +136,7 @@ app.get("/admin/stats", verifyToken, async (req, res) => {
       cancelled: cancelled.rows[0].count,
       booked: booked.rows[0].count,
     });
-  } catch (err) {
+  } catch {
     res.status(500).json({ message: "Error fetching stats" });
   }
 });
@@ -212,22 +213,17 @@ app.post("/appointments", verifyToken, async (req, res) => {
       message: "Booked",
       token: tokenNumber,
     });
-  } catch (err) {
+  } catch {
     res.status(500).json({ message: "Error booking" });
   }
 });
 
-
-app.use(express.static(path.join(__dirname, "frontend")));
-
+/* ================= FRONTEND ROUTE ================= */
 app.get("*", (req, res) => {
-  res.sendFile(path.join(__dirname, "frontend", "index.html"));
+  res.sendFile(path.join(__dirname, "frontend", "login.html"));
 });
+
 /* ================= START ================= */
 app.listen(3000, () => {
-  console.log("Server running");
-});
-
-app.get("/", (req, res) => {
-  res.send("Smart Appointment System Backend is Running 🚀");
+  console.log("Server running on port 3000");
 });
