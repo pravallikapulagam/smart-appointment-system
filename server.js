@@ -217,6 +217,12 @@ app.post("/appointments", verifyToken, async (req, res) => {
   }
 });
 
+
+app.use(express.static(path.join(__dirname, "frontend")));
+
+app.get("*", (req, res) => {
+  res.sendFile(path.join(__dirname, "frontend", "index.html"));
+});
 /* ================= START ================= */
 app.listen(3000, () => {
   console.log("Server running");
