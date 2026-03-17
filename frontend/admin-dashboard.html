@@ -120,7 +120,7 @@ async function loadAppointments() {
 }
 
 async function updateStatus(id, status) {
-  await fetch("http://localhost:3000/admin/appointments/" + id, {
+  await fetch("https://smart-appointment-system-e1wt.onrender.com" + id, {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
