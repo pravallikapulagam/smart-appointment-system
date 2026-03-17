@@ -380,3 +380,7 @@ app.put("/appointments/cancel/:id", verifyToken, (req, res) => {
 app.listen(3000, () => {
   console.log("Server running on port 3000");
 });
+
+app.get("/", (req, res) => {
+  res.send("Smart Appointment System Backend is Running 🚀");
+});
