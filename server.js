@@ -1,9 +1,9 @@
 const express = require("express");
-const mysql = require("mysql2");
 const cors = require("cors");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const path = require("path");
+const { Pool } = require("pg");
 
 const app = express();
 
@@ -12,68 +12,54 @@ app.use(express.json());
 
 app.use("/images", express.static(path.join(__dirname, "images")));
 
-const db = mysql.createConnection({
-  host: "localhost",
-  user: "root",
-  password: "root123",
-  database: "appointment_db"
-});
-
-db.connect((err) => {
-  if (err) {
-    console.log("Database connection failed:", err);
-  } else {
-    console.log("MySQL Connected");
-  }
+// ✅ PostgreSQL connection (Neon)
+const db = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false,
+  },
 });
 
 const SECRET = "smartclinicsecret";
 
-
 /* ================= LOGIN ================= */
-
-app.post("/login", (req, res) => {
-
+app.post("/login", async (req, res) => {
   const { email, password } = req.body;
 
-  db.query(
-    "SELECT * FROM users WHERE email = ?",
-    [email],
-    async (err, result) => {
+  try {
+    const result = await db.query(
+      "SELECT * FROM users WHERE email = $1",
+      [email]
+    );
 
-      if (err) return res.status(500).json({ message: "Server error" });
+    if (result.rows.length === 0)
+      return res.status(401).json({ message: "Invalid credentials" });
 
-      if (result.length === 0)
-        return res.status(401).json({ message: "Invalid credentials" });
+    const user = result.rows[0];
 
-      const user = result[0];
+    const match = await bcrypt.compare(password, user.password);
 
-      const match = await bcrypt.compare(password, user.password);
+    if (!match)
+      return res.status(401).json({ message: "Invalid credentials" });
 
-      if (!match)
-        return res.status(401).json({ message: "Invalid credentials" });
+    const token = jwt.sign(
+      { id: user.id, role: user.role },
+      SECRET,
+      { expiresIn: "1d" }
+    );
 
-      const token = jwt.sign(
-        { id: user.id, role: user.role },
-        SECRET,
-        { expiresIn: "1d" }
-      );
-
-      res.json({
-        token,
-        role: user.role,
-        name: user.name
-      });
-
-    }
-  );
+    res.json({
+      token,
+      role: user.role,
+      name: user.name,
+    });
+  } catch (err) {
+    res.status(500).json({ message: "Server error" });
+  }
 });
 
-
 /* ================= VERIFY TOKEN ================= */
-
 function verifyToken(req, res, next) {
-
   const header = req.headers["authorization"];
 
   if (!header) return res.status(401).json({ message: "No token" });
@@ -81,304 +67,159 @@ function verifyToken(req, res, next) {
   const token = header.split(" ")[1];
 
   jwt.verify(token, SECRET, (err, decoded) => {
-
     if (err) return res.status(401).json({ message: "Invalid token" });
 
     req.user = decoded;
-
     next();
   });
 }
 
-
 /* ================= HOSPITALS ================= */
-
-app.get("/hospitals/:city", (req, res) => {
-
-  db.query(
-    "SELECT * FROM hospitals WHERE city = ?",
-    [req.params.city],
-    (err, result) => {
-
-      if (err) return res.status(500).json({ message: "Error fetching hospitals" });
-
-      res.json(result);
-
-    }
-  );
-
+app.get("/hospitals/:city", async (req, res) => {
+  try {
+    const result = await db.query(
+      "SELECT * FROM hospitals WHERE city = $1",
+      [req.params.city]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ message: "Error fetching hospitals" });
+  }
 });
-
 
 /* ================= SINGLE HOSPITAL ================= */
-
-app.get("/hospital/:id", (req, res) => {
-
-  db.query(
-    "SELECT * FROM hospitals WHERE id = ?",
-    [req.params.id],
-    (err, result) => {
-
-      if (err) return res.status(500).json({ message: "Error fetching hospital" });
-
-      res.json(result[0]);
-
-    }
-  );
-
+app.get("/hospital/:id", async (req, res) => {
+  try {
+    const result = await db.query(
+      "SELECT * FROM hospitals WHERE id = $1",
+      [req.params.id]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ message: "Error fetching hospital" });
+  }
 });
 
-
-/* ================= DOCTORS BY HOSPITAL ================= */
-
-app.get("/hospital-doctors/:hospital_id", (req, res) => {
-
-  db.query(
-    "SELECT * FROM doctors WHERE hospital_id = ?",
-    [req.params.hospital_id],
-    (err, result) => {
-
-      if (err) return res.status(500).json({ message: "Error fetching doctors" });
-
-      res.json(result);
-
-    }
-  );
-
+/* ================= DOCTORS ================= */
+app.get("/hospital-doctors/:hospital_id", async (req, res) => {
+  try {
+    const result = await db.query(
+      "SELECT * FROM doctors WHERE hospital_id = $1",
+      [req.params.hospital_id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ message: "Error fetching doctors" });
+  }
 });
-
 
 /* ================= ADMIN STATS ================= */
+app.get("/admin/stats", verifyToken, async (req, res) => {
+  try {
+    const doctors = await db.query("SELECT COUNT(*) FROM doctors");
+    const apps = await db.query("SELECT COUNT(*) FROM appointments");
+    const completed = await db.query(
+      "SELECT COUNT(*) FROM appointments WHERE status='Completed'"
+    );
+    const cancelled = await db.query(
+      "SELECT COUNT(*) FROM appointments WHERE status='Cancelled'"
+    );
+    const booked = await db.query(
+      "SELECT COUNT(*) FROM appointments WHERE status='Booked'"
+    );
 
-app.get("/admin/stats", verifyToken, (req, res) => {
-
-  const stats = {};
-
-  db.query("SELECT COUNT(*) AS total FROM doctors", (err, doctors) => {
-
-    stats.totalDoctors = doctors[0].total;
-
-    db.query("SELECT COUNT(*) AS total FROM appointments", (err, apps) => {
-
-      stats.totalAppointments = apps[0].total;
-
-      db.query("SELECT COUNT(*) AS total FROM appointments WHERE status='Completed'", (err, completed) => {
-
-        stats.completed = completed[0].total;
-
-        db.query("SELECT COUNT(*) AS total FROM appointments WHERE status='Cancelled'", (err, cancelled) => {
-
-          stats.cancelled = cancelled[0].total;
-
-          db.query("SELECT COUNT(*) AS total FROM appointments WHERE status='Booked'", (err, booked) => {
-
-            stats.booked = booked[0].total;
-
-            res.json(stats);
-
-          });
-
-        });
-
-      });
-
+    res.json({
+      totalDoctors: doctors.rows[0].count,
+      totalAppointments: apps.rows[0].count,
+      completed: completed.rows[0].count,
+      cancelled: cancelled.rows[0].count,
+      booked: booked.rows[0].count,
     });
-
-  });
-
+  } catch (err) {
+    res.status(500).json({ message: "Error fetching stats" });
+  }
 });
-
 
 /* ================= ADMIN DOCTORS ================= */
-
-app.get("/admin/doctors", verifyToken, (req, res) => {
-
-  db.query("SELECT * FROM doctors", (err, result) => {
-
-    if (err) return res.status(500).json({ message: "Error fetching doctors" });
-
-    res.json(result);
-
-  });
-
+app.get("/admin/doctors", verifyToken, async (req, res) => {
+  try {
+    const result = await db.query("SELECT * FROM doctors");
+    res.json(result.rows);
+  } catch {
+    res.status(500).json({ message: "Error fetching doctors" });
+  }
 });
 
-
-app.post("/admin/doctors", verifyToken, (req, res) => {
-
+app.post("/admin/doctors", verifyToken, async (req, res) => {
   const { name, specialization, experience } = req.body;
 
-  db.query(
-    "INSERT INTO doctors (name, specialization, experience) VALUES (?, ?, ?)",
-    [name, specialization, experience],
-    (err) => {
-
-      if (err) return res.status(500).json({ message: "Error adding doctor" });
-
-      res.json({ message: "Doctor added successfully" });
-
-    }
-  );
-
+  try {
+    await db.query(
+      "INSERT INTO doctors (name, specialization, experience) VALUES ($1,$2,$3)",
+      [name, specialization, experience]
+    );
+    res.json({ message: "Doctor added" });
+  } catch {
+    res.status(500).json({ message: "Error adding doctor" });
+  }
 });
 
-
-app.delete("/admin/doctors/:id", verifyToken, (req, res) => {
-
-  db.query(
-    "DELETE FROM doctors WHERE id = ?",
-    [req.params.id],
-    (err) => {
-
-      if (err) return res.status(500).json({ message: "Error deleting doctor" });
-
-      res.json({ message: "Doctor deleted" });
-
-    }
-  );
-
-});
-
-
-
-// ================= ADMIN VIEW APPOINTMENTS =================
-app.get("/admin/appointments", verifyToken, (req, res) => {
-
-  db.query(
-    `SELECT 
-        a.id,
-        u.name AS user_name,
-        a.patient_name,
-        a.phone,
-        a.appointment_date,
-        a.appointment_time,
-        a.token_number,
-        a.status,
-        d.name AS doctor_name,
-        h.name AS hospital_name
-     FROM appointments a
-     JOIN users u ON a.user_id = u.id
-     JOIN doctors d ON a.doctor_id = d.id
-     JOIN hospitals h ON d.hospital_id = h.id`,
-    (err, result) => {
-
-      if (err) {
-        return res.status(500).json({ message: "Error fetching appointments" });
-      }
-
-      res.json(result);
-
-    }
-  );
-
+app.delete("/admin/doctors/:id", verifyToken, async (req, res) => {
+  try {
+    await db.query("DELETE FROM doctors WHERE id=$1", [req.params.id]);
+    res.json({ message: "Doctor deleted" });
+  } catch {
+    res.status(500).json({ message: "Error deleting doctor" });
+  }
 });
 
 /* ================= BOOK APPOINTMENT ================= */
+app.post("/appointments", verifyToken, async (req, res) => {
+  const {
+    doctor_id,
+    patient_name,
+    age,
+    phone,
+    appointment_date,
+    appointment_time,
+  } = req.body;
 
-app.post("/appointments", verifyToken, (req, res) => {
+  try {
+    const countResult = await db.query(
+      "SELECT COUNT(*) FROM appointments WHERE doctor_id=$1 AND appointment_date=$2",
+      [doctor_id, appointment_date]
+    );
 
-  const { doctor_id, patient_name, age, phone, appointment_date, appointment_time } = req.body;
+    const tokenNumber = parseInt(countResult.rows[0].count) + 1;
 
-  if (!doctor_id || !patient_name || !phone || !appointment_date || !appointment_time)
-    return res.status(400).json({ message: "All fields required" });
+    await db.query(
+      `INSERT INTO appointments 
+      (user_id, doctor_id, patient_name, age, phone, appointment_date, appointment_time, token_number, status)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'Booked')`,
+      [
+        req.user.id,
+        doctor_id,
+        patient_name,
+        age,
+        phone,
+        appointment_date,
+        appointment_time,
+        tokenNumber,
+      ]
+    );
 
-  db.query(
-    "SELECT COUNT(*) AS count FROM appointments WHERE doctor_id = ? AND appointment_date = ?",
-    [doctor_id, appointment_date],
-    (err, result) => {
-
-      const tokenNumber = result[0].count + 1;
-
-      db.query(
-        `INSERT INTO appointments 
-        (user_id, doctor_id, patient_name, age, phone, appointment_date, appointment_time, token_number, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Booked')`,
-        [
-          req.user.id,
-          doctor_id,
-          patient_name,
-          age,
-          phone,
-          appointment_date,
-          appointment_time,
-          tokenNumber
-        ],
-        (err) => {
-
-          if (err)
-            return res.status(500).json({ message: "Error booking appointment" });
-
-          res.json({
-            message: "Appointment booked successfully",
-            token: tokenNumber
-          });
-
-        }
-      );
-
-    }
-  );
-
+    res.json({
+      message: "Booked",
+      token: tokenNumber,
+    });
+  } catch (err) {
+    res.status(500).json({ message: "Error booking" });
+  }
 });
 
-
-/* ================= USER VIEW APPOINTMENTS ================= */
-
-app.get("/appointments", verifyToken, (req, res) => {
-
-  db.query(
-    `SELECT 
-        a.id,
-        a.patient_name,
-        a.age,
-        a.phone,
-        a.appointment_date,
-        a.appointment_time,
-        a.token_number,
-        a.status,
-        d.name AS doctor_name,
-        h.name AS hospital_name,
-        h.id AS hospital_id
-     FROM appointments a
-     JOIN doctors d ON a.doctor_id = d.id
-     JOIN hospitals h ON d.hospital_id = h.id
-     WHERE a.user_id = ?`,
-    [req.user.id],
-    (err, result) => {
-
-      if (err) return res.status(500).json({ message: "Error fetching appointments" });
-
-      res.json(result);
-
-    }
-  );
-
-});
-
-
-/* ================= USER CANCEL ================= */
-
-app.put("/appointments/cancel/:id", verifyToken, (req, res) => {
-
-  db.query(
-    "UPDATE appointments SET status='Cancelled' WHERE id=? AND user_id=?",
-    [req.params.id, req.user.id],
-    (err) => {
-
-      if (err) return res.status(500).json({ message: "Error cancelling appointment" });
-
-      res.json({ message: "Appointment cancelled" });
-
-    }
-  );
-
-});
-
-
-/* ================= START SERVER ================= */
-
+/* ================= START ================= */
 app.listen(3000, () => {
-  console.log("Server running on port 3000");
+  console.log("Server running");
 });
 
 app.get("/", (req, res) => {
