@@ -12,15 +12,9 @@ app.use(express.json());
 
 app.use("/images", express.static(path.join(__dirname, "images")));
 
-/* ================= DATABASE CONNECTION ================= */
+/* ================= DATABASE ================= */
 
-const db = mysql.createConnection({
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-  port: process.env.DB_PORT
-});
+const db = mysql.createConnection(process.env.DATABASE_URL);
 
 db.connect((err) => {
   if (err) {
@@ -75,23 +69,6 @@ app.post("/login", (req, res) => {
     }
   );
 });
-
-/* ================= VERIFY TOKEN ================= */
-
-function verifyToken(req, res, next) {
-  const header = req.headers["authorization"];
-
-  if (!header) return res.status(401).json({ message: "No token" });
-
-  const token = header.split(" ")[1];
-
-  jwt.verify(token, SECRET, (err, decoded) => {
-    if (err) return res.status(401).json({ message: "Invalid token" });
-
-    req.user = decoded;
-    next();
-  });
-}
 
 /* ================= TEST ROUTE ================= */
 
