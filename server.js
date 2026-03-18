@@ -1,65 +1,83 @@
 const express = require("express");
+const mysql = require("mysql2");
 const cors = require("cors");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const path = require("path");
-const { Pool } = require("pg");
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 
-// ✅ Serve frontend
-app.use(express.static(path.join(__dirname, "frontend")));
+app.use("/images", express.static(path.join(__dirname, "images")));
 
-// ✅ PostgreSQL (Neon)
-const db = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false,
-  },
+/* ================= DATABASE CONNECTION ================= */
+
+const db = mysql.createConnection({
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+  port: process.env.DB_PORT
 });
+
+db.connect((err) => {
+  if (err) {
+    console.log("❌ Database connection failed:", err);
+  } else {
+    console.log("✅ MySQL Connected");
+  }
+});
+
+/* ================= SECRET ================= */
 
 const SECRET = "smartclinicsecret";
 
 /* ================= LOGIN ================= */
-app.post("/login", async (req, res) => {
+
+app.post("/login", (req, res) => {
   const { email, password } = req.body;
 
-  try {
-    const result = await db.query(
-      "SELECT * FROM users WHERE email = $1",
-      [email]
-    );
+  db.query(
+    "SELECT * FROM users WHERE email = ?",
+    [email],
+    async (err, result) => {
 
-    if (result.rows.length === 0)
-      return res.status(401).json({ message: "Invalid credentials" });
+      if (err) {
+        console.log(err);
+        return res.status(500).json({ message: "Server error" });
+      }
 
-    const user = result.rows[0];
+      if (result.length === 0) {
+        return res.status(401).json({ message: "Invalid credentials" });
+      }
 
-    const match = await bcrypt.compare(password, user.password);
+      const user = result[0];
 
-    if (!match)
-      return res.status(401).json({ message: "Invalid credentials" });
+      const match = await bcrypt.compare(password, user.password);
 
-    const token = jwt.sign(
-      { id: user.id, role: user.role },
-      SECRET,
-      { expiresIn: "1d" }
-    );
+      if (!match) {
+        return res.status(401).json({ message: "Invalid credentials" });
+      }
 
-    res.json({
-      token,
-      role: user.role,
-      name: user.name,
-    });
-  } catch (err) {
-    res.status(500).json({ message: "Server error" });
-  }
+      const token = jwt.sign(
+        { id: user.id, role: user.role },
+        SECRET,
+        { expiresIn: "1d" }
+      );
+
+      res.json({
+        token,
+        role: user.role,
+        name: user.name
+      });
+    }
+  );
 });
 
 /* ================= VERIFY TOKEN ================= */
+
 function verifyToken(req, res, next) {
   const header = req.headers["authorization"];
 
@@ -75,155 +93,16 @@ function verifyToken(req, res, next) {
   });
 }
 
-/* ================= HOSPITALS ================= */
-app.get("/hospitals/:city", async (req, res) => {
-  try {
-    const result = await db.query(
-      "SELECT * FROM hospitals WHERE city = $1",
-      [req.params.city]
-    );
-    res.json(result.rows);
-  } catch {
-    res.status(500).json({ message: "Error fetching hospitals" });
-  }
-});
+/* ================= TEST ROUTE ================= */
 
-/* ================= SINGLE HOSPITAL ================= */
-app.get("/hospital/:id", async (req, res) => {
-  try {
-    const result = await db.query(
-      "SELECT * FROM hospitals WHERE id = $1",
-      [req.params.id]
-    );
-    res.json(result.rows[0]);
-  } catch {
-    res.status(500).json({ message: "Error fetching hospital" });
-  }
-});
-
-/* ================= DOCTORS ================= */
-app.get("/hospital-doctors/:hospital_id", async (req, res) => {
-  try {
-    const result = await db.query(
-      "SELECT * FROM doctors WHERE hospital_id = $1",
-      [req.params.hospital_id]
-    );
-    res.json(result.rows);
-  } catch {
-    res.status(500).json({ message: "Error fetching doctors" });
-  }
-});
-
-/* ================= ADMIN STATS ================= */
-app.get("/admin/stats", verifyToken, async (req, res) => {
-  try {
-    const doctors = await db.query("SELECT COUNT(*) FROM doctors");
-    const apps = await db.query("SELECT COUNT(*) FROM appointments");
-    const completed = await db.query(
-      "SELECT COUNT(*) FROM appointments WHERE status='Completed'"
-    );
-    const cancelled = await db.query(
-      "SELECT COUNT(*) FROM appointments WHERE status='Cancelled'"
-    );
-    const booked = await db.query(
-      "SELECT COUNT(*) FROM appointments WHERE status='Booked'"
-    );
-
-    res.json({
-      totalDoctors: doctors.rows[0].count,
-      totalAppointments: apps.rows[0].count,
-      completed: completed.rows[0].count,
-      cancelled: cancelled.rows[0].count,
-      booked: booked.rows[0].count,
-    });
-  } catch {
-    res.status(500).json({ message: "Error fetching stats" });
-  }
-});
-
-/* ================= ADMIN DOCTORS ================= */
-app.get("/admin/doctors", verifyToken, async (req, res) => {
-  try {
-    const result = await db.query("SELECT * FROM doctors");
-    res.json(result.rows);
-  } catch {
-    res.status(500).json({ message: "Error fetching doctors" });
-  }
-});
-
-app.post("/admin/doctors", verifyToken, async (req, res) => {
-  const { name, specialization, experience } = req.body;
-
-  try {
-    await db.query(
-      "INSERT INTO doctors (name, specialization, experience) VALUES ($1,$2,$3)",
-      [name, specialization, experience]
-    );
-    res.json({ message: "Doctor added" });
-  } catch {
-    res.status(500).json({ message: "Error adding doctor" });
-  }
-});
-
-app.delete("/admin/doctors/:id", verifyToken, async (req, res) => {
-  try {
-    await db.query("DELETE FROM doctors WHERE id=$1", [req.params.id]);
-    res.json({ message: "Doctor deleted" });
-  } catch {
-    res.status(500).json({ message: "Error deleting doctor" });
-  }
-});
-
-/* ================= BOOK APPOINTMENT ================= */
-app.post("/appointments", verifyToken, async (req, res) => {
-  const {
-    doctor_id,
-    patient_name,
-    age,
-    phone,
-    appointment_date,
-    appointment_time,
-  } = req.body;
-
-  try {
-    const countResult = await db.query(
-      "SELECT COUNT(*) FROM appointments WHERE doctor_id=$1 AND appointment_date=$2",
-      [doctor_id, appointment_date]
-    );
-
-    const tokenNumber = parseInt(countResult.rows[0].count) + 1;
-
-    await db.query(
-      `INSERT INTO appointments 
-      (user_id, doctor_id, patient_name, age, phone, appointment_date, appointment_time, token_number, status)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'Booked')`,
-      [
-        req.user.id,
-        doctor_id,
-        patient_name,
-        age,
-        phone,
-        appointment_date,
-        appointment_time,
-        tokenNumber,
-      ]
-    );
-
-    res.json({
-      message: "Booked",
-      token: tokenNumber,
-    });
-  } catch {
-    res.status(500).json({ message: "Error booking" });
-  }
-});
-
-/* ================= FRONTEND ROUTE ================= */
 app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "frontend", "login.html"));
+  res.send("Smart Appointment System Backend is Running 🚀");
 });
 
-/* ================= START ================= */
-app.listen(3000, () => {
-  console.log("Server running on port 3000");
+/* ================= START SERVER ================= */
+
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
 });
